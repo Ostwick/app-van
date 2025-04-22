@@ -43,6 +43,7 @@ object PrinterHelper {
 
                         val text = stripper.getText(document)
                         document.close()
+                        Log.d("PrinterHelper", "Texto original do PDF:\n$text")
 
                         val lines = text.lines().filter { it.isNotBlank() }
 
@@ -63,7 +64,7 @@ object PrinterHelper {
                         val data = lines.getOrNull(10) ?: ""
                         val representante = lines.getOrNull(12) ?: ""
 
-                        val pedido = "Pedido: ${lines.getOrNull(42)} : ${lines.getOrNull(43)}"
+                        val pedido = "${lines.getOrNull(42)}"
 
                         // Encontrar a linha com "Total dos Itens"
                         val indexTotalItens = lines.indexOfFirst { it.contains("Total dos Itens") }
@@ -73,60 +74,63 @@ object PrinterHelper {
                         val produtosBrutos = lines.drop(44).take(indexFimProdutos - 44)
                         val produtos = produtosBrutos.mapNotNull { formatarProduto(it) }.joinToString("\n")
 
-                        val totalBruto = lines.getOrNull(indexTotalItens) ?: ""
-                        val descontoGeral = lines.getOrNull(indexTotalItens + 2) ?: ""
-                        val ipi = lines.getOrNull(indexTotalItens + 3)?.drop(16) ?: ""
-                        val totalLiquido = lines.getOrNull(indexTotalItens + 4)?.drop(12) ?: ""
+                        val totalBruto = lines.getOrNull(indexTotalItens - 3) ?: ""
+                        val descontoGeral = lines.getOrNull(indexTotalItens - 1) ?: ""
+                        val ipiLinha = lines.getOrNull(indexTotalItens) ?: ""
+                        val ipi = ipiLinha.substringAfter("Total dos Itens").trim().ifEmpty { "0,00" }
+                        val totalLiquido = lines.getOrNull(indexTotalItens + 1)?.drop(12) ?: ""
 
-                        val linha55 = lines.getOrNull(indexTotalItens + 6) ?: ""
-                        val valores55 = linha55.split(",")
-                        val difal = valores55.getOrNull(0)?.trim() ?: ""
-                        val qtdTotal = valores55.getOrNull(1)?.substring(2)?.trim() ?: ""
-                        val icms = valores55.getOrNull(0) + "," + valores55.getOrNull(1)?.take(2)
+                        val linhaICMS_Qtd = lines.getOrNull(indexTotalItens + 3) ?: ""
+                        val posVirgula = linhaICMS_Qtd.indexOf(',')
 
-                        val linha57 = lines.getOrNull(indexTotalItens + 8) ?: ""
-                        val st = linha57.split(",").getOrNull(2)?.substring(2)?.trim() ?: ""
+                        val icms = if (posVirgula != -1 && linhaICMS_Qtd.length > posVirgula + 2) {
+                            linhaICMS_Qtd.substring(0, posVirgula + 3).trim()
+                        } else "0,00"
+
+                        val qtdTotal = if (posVirgula != -1 && linhaICMS_Qtd.length > posVirgula + 3) {
+                            linhaICMS_Qtd.substring(posVirgula + 3).trim()
+                        } else ""
+
+                        val linhaDifalST = lines.getOrNull(indexTotalItens + 5) ?: ""
+                        val numerosVirgula = Regex("(\\d+,\\d{2})").findAll(linhaDifalST).map { it.value }.toList()
+
+                        val difal = numerosVirgula.getOrNull(1) ?: "0,00"
+                        val st = numerosVirgula.getOrNull(2) ?: "0,00"
+
+                        Log.d("PrinterHelper", "IPI: $ipi")
+                        Log.d("PrinterHelper", "ICMS: $icms")
+                        Log.d("PrinterHelper", "Difal: $difal")
+                        Log.d("PrinterHelper", "ST: $st")
+                        val impostos = somarImpostos(ipi, icms, difal, st)
 
                         val finalText = """
-[C]<b>STEELBRAS PEDIDO</b>
-[L]Empresa: $empresa
+[L]PEDIDO: $pedido    $data
 [L]Nome: $nome
-[L]Fantasia: $fantasia
-[L]Endereço: $endereco
-[L]Bairro: $bairro
-[L]CEP: $cep
-[L]Cidade: $cidade
-[L]CNPJ: $cnpj
-[L]Fone: $fone
-[L]E-mail: $email
+                        
+[L]CODIGO     QTD     VL. TOTAL
+[L]DESCRICAO
 
-[L]Banco: $banco
-[L]Pagamento: $pagamento
-[L]Data: $data
-[L]Representante: $representante
-
-[C]----------------------------
-[L]$pedido
-[L]Produtos:
 $produtos
+                        
 [C]----------------------------
+[C]<b>TOTAIS:</b>
 [L]Qtd Total: $qtdTotal
 [L]Total Bruto: $totalBruto
 [L]Desconto: $descontoGeral
-[L]IPI: $ipi
-[L]ICMS: $icms
-[L]Difal: $difal
-[L]ST: $st
+[L]Impostos: $impostos
 [L]Valor Total: $totalLiquido
-
+                        
+[C]<b>FORMAS DE PAGAMENTO:</b>
+$pagamento
+                        
 [C]_____________________________
 [C]Assinatura do Cliente
-                        """.trimIndent()
+""".trimIndent()
 
                         Log.d("PrinterHelper", "Texto formatado para impressão:\n$finalText")
 
                         val printer = EscPosPrinter(connection, 203, 48f, 32)
-                        printer.printFormattedText(finalText)
+                        //printer.printFormattedText(finalText)
 
                         Toast.makeText(context, "Impressão concluída com sucesso", Toast.LENGTH_SHORT).show()
                     }
@@ -141,38 +145,37 @@ $produtos
     }
 
     private fun formatarProduto(linha: String): String? {
-        if (!linha.contains("-")) return null
-
         return try {
             val partes = linha.split(" ")
-            val qtd = partes[0]
-            val unit = partes[1]
-            val total = partes[2]
-            val ipiRaw = partes[3]
+            val qtd = partes.getOrNull(0) ?: return null
+            val unit = partes.getOrNull(1) ?: return null
+            val total = partes.getOrNull(2) ?: return null
 
-            val ipi = ipiRaw.replace(",", ".").toFloatOrNull()?.let {
-                String.format("%.2f", it).replace(".", ",")
-            } ?: ipiRaw
+            // Captura o IPI usando regex
+            val ipiRegex = Regex("\\d+,\\d{2}")
+            val ipiMatch = ipiRegex.find(linha, startIndex = total.length + unit.length + qtd.length)
+            val ipi = ipiMatch?.value ?: "0,00"
 
-            val depoisDoIPI = linha.substringAfter(ipiRaw).trim()
+            // Captura o código do produto logo após o IPI
+            val depoisDoIPI = linha.substringAfter(ipi).trim()
+            val codigoRegex = Regex("(\\d{8,})\\s*-")
+            val codigoMatch = codigoRegex.find(depoisDoIPI)
+            val codigo = codigoMatch?.groups?.get(1)?.value?.takeLast(8)?.padStart(8, '0') ?: "????????"
 
-            val regexCodigo = Regex("(\\d{8,})\\s*-")
-            val match = regexCodigo.find(depoisDoIPI)
-            val codigo = match?.groups?.get(1)?.value?.takeLast(8)?.padStart(8, '0') ?: "????????"
-
+            // Extrai o nome do produto entre o traço e os próximos valores numéricos
             val nome = depoisDoIPI.substringAfter("-").trim()
                 .split(Regex("\\d+,\\d{2}")).firstOrNull()?.trim() ?: "Sem Nome"
 
-            val valores = Regex("(\\d+,\\d{2})").findAll(depoisDoIPI).map { it.value }.toList()
-
-            val icms = valores.getOrNull(0) ?: "0,00"
-            val desconto = valores.getOrNull(1) ?: "0,00"
-            val difal = valores.getOrNull(2) ?: "0,00"
-            val st = valores.getOrNull(3) ?: "0,00"
-
-            "$codigo - $nome Qtd: $qtd Unit: $unit Desconto: $desconto Total: $total Difal: $difal ICMS: $icms IPI: $ipi ST: $st"
+            "$codigo      $qtd      $total\n$nome"
         } catch (e: Exception) {
+            Log.e("PrinterHelper", "Erro ao formatar produto: ${e.message}", e)
             null
         }
+    }
+
+    private fun somarImpostos(ipi: String?, icms: String?, difal: String?, st: String?): String {
+        fun parse(valor: String?) = valor?.replace(",", ".")?.toFloatOrNull() ?: 0f
+        val total = parse(ipi) + parse(icms) + parse(difal) + parse(st)
+        return "%.2f".format(total).replace(".", ",")
     }
 }
