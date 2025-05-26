@@ -1,9 +1,9 @@
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
-    alias(libs.plugins.kotlin.compose)
+    id("org.jetbrains.kotlin.plugin.compose")
     id("kotlin-kapt")
-    id("dagger.hilt.android.plugin")
+    id("com.google.dagger.hilt.android")
 
 }
 
@@ -12,22 +12,31 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.example.pdfvan"
+        applicationId = "com.ostwick.bluetoothprinterfromjson"
         minSdk = 24
         targetSdk = 35
         versionCode = 1
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        vectorDrawables { // Good to have for adaptive icons
+            useSupportLibrary = true
+        }
     }
 
     buildTypes {
-        release {
-            isMinifyEnabled = false
+        getByName("release") {
+            isMinifyEnabled = true    // Enables code shrinking, obfuscation, and optimization
+            isShrinkResources = true  // Enables resource shrinking
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
+                "proguard-rules.pro" // Your custom ProGuard rules
             )
+            // You will also need to configure signing here (see next step)
+        }
+        getByName("debug") {
+            isMinifyEnabled = false
+            // ... other debug settings
         }
     }
     compileOptions {
@@ -39,6 +48,15 @@ android {
     }
     buildFeatures {
         compose = true
+    }
+    composeOptions { // Add this block for Compose specific compiler options
+        kotlinCompilerExtensionVersion = libs.versions.compose.compiler.get() // Ensure you have this in libs.versions.toml
+    }
+    packaging { // Add this for potential native library conflicts
+        resources {
+            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            // You might need more excludes depending on your libraries
+        }
     }
 }
 

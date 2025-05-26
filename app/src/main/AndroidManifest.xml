@@ -2,15 +2,53 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <uses-permission android:name="android.permission.BLUETOOTH"/>
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+    <!-- For Android 11 (API 30) and lower -->
+    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+
+    <!-- For Android 12 (API 31) and higher -->
+    <!--
+        IMPORTANT: If you are SURE your app does not derive physical location from Bluetooth scans
+        (e.g., you are not using Bluetooth beacons for location), add usesPermissionFlags.
+        Otherwise, location permission MIGHT still be implicitly needed or improve scan results.
+    -->
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+        android:usesPermissionFlags="neverForLocation"
+        tools:targetApi="s" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+    <!--
+        Location Permissions:
+        - REQUIRED for Bluetooth discovery to return results on Android 11 (API 30) and older.
+        - If you use "neverForLocation" with BLUETOOTH_SCAN, this is not strictly needed for
+          Bluetooth scanning ON ANDROID 12+ for apps that don't derive location.
+        - However, if your app supports Android 11 and below, you WILL need this for BT scanning.
+        - Given you likely support older Android versions, keeping FINE_LOCATION is safer.
+          You'll need to request it at runtime for < API 31.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- ACCESS_COARSE_LOCATION is usually not needed if you have ACCESS_FINE_LOCATION -->
+    <!-- <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" /> -->
+
+    <!--
+        Storage Permissions:
+        READ_EXTERNAL_STORAGE is for legacy access.
+        For Android 13 (API 33)+, this permission behaves differently.
+        Consider using the Photo Picker or Storage Access Framework for file access.
+    -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
+
+    <!--
+        MANAGE_EXTERNAL_STORAGE:
+        This is a highly restricted permission. Your app will likely be rejected from the Play Store
+        unless it fits into a very specific category (e.g., file manager, backup app) and you
+        get prior approval.
+        For most use cases, you should use Scoped Storage, MediaStore, or Storage Access Framework.
+        STRONGLY consider if you absolutely need this.
+    -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
-    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+
     <uses-permission android:name="android.permission.INTERNET" />
 
     <application
@@ -23,9 +61,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@style/Theme.PDFVan"
-        tools:targetApi="31">
-
-
+        tools:targetApi="31"> <!-- This means you are targeting Android 12 -->
 
         <activity
             android:name=".MainActivity"
@@ -34,7 +70,6 @@
             android:theme="@style/Theme.PDFVan">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
-
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
