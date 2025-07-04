@@ -17,6 +17,7 @@ object PrinterHelper {
 
     fun printPedido(context: Context, device: android.bluetooth.BluetoothDevice, pedidoResponse: PedidoResponse) {
         val connection = BluetoothConnection(device)
+        var totalDescontos = 0f
 
         // Criar um formatador de números para duas casas decimais com vírgula
         val decimalFormatSymbols = DecimalFormatSymbols(Locale("pt", "BR"))
@@ -34,13 +35,18 @@ object PrinterHelper {
 
             val endereco = pedido.PDV_PedidoEnderecos.firstOrNull()
             val produtos = pedido.PedidoProdutos
+            val descontoPedido = pedido.PDV_PedidoDescontoValor.replace(",", ".").toFloatOrNull() ?: 0f
+            totalDescontos += descontoPedido
 
             val produtosFormatados = produtos.joinToString("\n") { produto ->
                 val codigo = produto.PDV_PedidoItemProduto.padStart(8, '0')
                 val nome = produto.PDV_PedidoItemProdutoNome
                 val qtd = (produto.PDV_PedidoItemQtdPedida.toFloatOrNull() ?: 0f).let { formatter.format(it) }
                 val unit = (produto.PDV_PedidoItemValorUnitario.toFloatOrNull() ?: 0f).let { formatter.format(it) }
-                val desconto = (produto.PDV_PedidoItemDescontoValor.toFloatOrNull() ?: 0f).let { formatter.format(it) }
+                val descontoValor = produto.PDV_PedidoItemDescontoValor.replace(",", ".").toFloatOrNull() ?: 0f
+                val desconto = formatter.format(descontoValor)
+                totalDescontos += descontoValor
+
 
                 // Calcular IPI e ST para este produto
                 var ipiProduto = 0f
@@ -70,7 +76,7 @@ object PrinterHelper {
 [L]PEDIDO: ${pedido.PDV_PedidoCodigo}               ${pedido.PDV_PedidoDataEmissao}
 [L]Empresa: ${pedido.PDV_PedidoEmpDescricao}
 [L]Fantasia: ${pedido.PDV_PedidoEmpFantasia}
-[L]Endereço: ${endereco?.EMP_EnderecoLogradouro ?: ""}, ${endereco?.EMP_EnderecoNumero ?: ""}
+[L]Endereco: ${endereco?.EMP_EnderecoLogradouro ?: ""}, ${endereco?.EMP_EnderecoNumero ?: ""}
 [L]Bairro: ${endereco?.EMP_EnderecoBairro ?: ""} - CEP: ${endereco?.CID_LogradouroCEP?.toString() ?: ""}
 [L]Cidade: ${endereco?.CID_Descricao ?: ""} - ${endereco?.CID_EstadoCodigo ?: ""}
 [C]************************************************
@@ -83,6 +89,7 @@ $produtosFormatados
 [C]<b>TOTAIS:</b>
 [L]Total: ${formatter.format(pedido.PDV_PedidoValorTotal.toFloatOrNull() ?: 0f)}
 [L]Frete: ${formatter.format(pedido.PDV_PedidoFreteValor.toFloatOrNull() ?: 0f)}
+[L]Descontos: ${formatter.format(totalDescontos)}
 [L]ST: $stTotal
 [L]Demais Impostos: $demaisImpostosTotal
 [L]Pagamento: ${pedido.PDV_PedidoCondicaoPgtoDescricao}
