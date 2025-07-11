@@ -1,13 +1,13 @@
 package com.example.pdfvan.ui.screens
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Activity
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
@@ -45,187 +45,114 @@ fun MainScreen(viewModel: PedidoViewModel = hiltViewModel()) {
     val fixedPassword = "S3nh43xtr3m@m3nt3S3gur4"
 
     var pedidoNumber by remember { mutableStateOf("") }
-
     val pedido by viewModel.pedido.collectAsState()
-    val error by viewModel.error.collectAsState() // Observe error messages from ViewModel
+    val error by viewModel.error.collectAsState()
     val sessaoId by viewModel.sessaoId.collectAsState()
 
     var selectedDevice by remember { mutableStateOf<BluetoothDevice?>(null) }
     val bluetoothAdapter: BluetoothAdapter? = remember { BluetoothAdapter.getDefaultAdapter() }
 
-    // State to track if the user has attempted to check/grant permissions for listing devices
-    var deviceListPermissionsAttempted by remember { mutableStateOf(false) }
+    // --- State for the robust permission and action flow ---
+    var pendingAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var pairedDevices by remember { mutableStateOf<List<BluetoothDevice>>(emptyList()) }
+    var showDeviceList by remember { mutableStateOf(false) }
 
-    // Consolidate error display from ViewModel and local permission errors
-    var localError by remember { mutableStateOf<String?>(null) }
-    LaunchedEffect(error) { // Show errors from ViewModel
+    LaunchedEffect(error) {
         error?.let {
             scope.launch { snackbarHostState.showSnackbar(it) }
-            // Optionally clear ViewModel error after showing if it's a one-time message
-            // viewModel.clearError() // You'd need to implement this in ViewModel
-        }
-    }
-    LaunchedEffect(localError) { // Show local errors (e.g., permission denied messages)
-        localError?.let {
-            scope.launch { snackbarHostState.showSnackbar(it) }
-            localError = null // Clear local error after showing
         }
     }
 
-
-    // --- Permission Launchers ---
+    // --- Permission Launchers (with all fixes) ---
     val enableBluetoothLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            // Bluetooth was enabled, user might want to try the action again
-            scope.launch { snackbarHostState.showSnackbar("Bluetooth ativado.") }
-            // Re-trigger the action that required Bluetooth to be on, e.g., listing devices
-            deviceListPermissionsAttempted = false // Allow re-attempt to list
+            scope.launch { snackbarHostState.showSnackbar("Bluetooth ativado. Tentando ação novamente...") }
+            // Critical fix: resume the pending action after Bluetooth is enabled.
+            pendingAction?.invoke()
+            pendingAction = null
         } else {
-            localError = "Ativação do Bluetooth cancelada ou falhou."
+            scope.launch { snackbarHostState.showSnackbar("Ativação do Bluetooth é necessária.") }
         }
     }
 
     val multiplePermissionsLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        var allRequiredGranted = true
-        // Check specific permissions based on what was requested
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            if (permissions[Manifest.permission.BLUETOOTH_CONNECT] == false) {
-                localError = "Permissão BLUETOOTH_CONNECT é necessária."
-                allRequiredGranted = false
-            }
-            if (permissions[Manifest.permission.BLUETOOTH_SCAN] == false) {
-                // Inform, but might not block all operations if only CONNECT was critical for the last action
-                localError = (localError ?: "") + " Permissão BLUETOOTH_SCAN pode ser necessária para novas buscas."
-            }
-        } else {
-            if (permissions[Manifest.permission.ACCESS_FINE_LOCATION] == false) {
-                localError = "Permissão de Localização é necessária para Bluetooth em versões antigas."
-                allRequiredGranted = false
-            }
-        }
-
-        if (allRequiredGranted) {
+        val allPermissionsGranted = permissions.all { it.value }
+        if (allPermissionsGranted) {
             scope.launch { snackbarHostState.showSnackbar("Permissões concedidas.") }
-            // The action that triggered this should now be able to proceed
-            // or the UI should update reactively
+            pendingAction?.invoke()
+            pendingAction = null
+        } else {
+            scope.launch { snackbarHostState.showSnackbar("Permissões são necessárias para esta função.") }
         }
-        deviceListPermissionsAttempted = true // Mark that an attempt was made
     }
 
-    // --- Helper Function to Check and Request Permissions ---
-    fun ensurePermissionsAndExecute(
-        actionRequiresScan: Boolean = false, // If the action is specifically a new scan
-        actionRequiresConnect: Boolean = true, // Most BT operations will need connect
-        onPermissionsGranted: () -> Unit
-    ) {
+    // --- The single, robust helper function to handle all checks ---
+    fun requestPermissionsAndRun(action: () -> Unit) {
         if (bluetoothAdapter == null) {
-            localError = "Bluetooth não suportado neste dispositivo."
+            scope.launch { snackbarHostState.showSnackbar("Bluetooth não é suportado.") }
             return
         }
         if (!bluetoothAdapter.isEnabled) {
+            pendingAction = action
             enableBluetoothLauncher.launch(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
-            localError = "Por favor, ative o Bluetooth e tente novamente."
             return
         }
-
-        val permissionsToRequest = mutableListOf<String>()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) { // Android 12+
-            if (actionRequiresScan && ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.BLUETOOTH_SCAN)
-            }
-            if (actionRequiresConnect && ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.BLUETOOTH_CONNECT)
-            }
-        } else { // Android 11 and older
-            // Location is generally needed for discovery and sometimes for bonded device details
-            if (ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                permissionsToRequest.add(Manifest.permission.ACCESS_FINE_LOCATION)
-            }
-            // BLUETOOTH and BLUETOOTH_ADMIN are install-time if targetSdk < 31
-        }
-
-        if (permissionsToRequest.isNotEmpty()) {
-            deviceListPermissionsAttempted = true // Mark that we are now attempting
-            multiplePermissionsLauncher.launch(permissionsToRequest.toTypedArray())
+        val requiredPermissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            listOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
         } else {
-            // All permissions for the intended action are already granted
-            onPermissionsGranted()
+            listOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+        val missingPermissions = requiredPermissions.filter {
+            ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
+        }
+        if (missingPermissions.isEmpty()) {
+            action()
+        } else {
+            pendingAction = action
+            multiplePermissionsLauncher.launch(missingPermissions.toTypedArray())
         }
     }
-
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = {
-                    Box(
-                        modifier = Modifier.fillMaxSize(),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.app_logo),
-                            contentDescription = "App Logo Background",
-                            modifier = Modifier.fillMaxSize().graphicsLayer(alpha = 0.15f),
-                            contentScale = ContentScale.Fit
-                        )
-                        Text(
-                            "Bluetooth Printer",
-                            textAlign = TextAlign.Center,
-                            style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                        )
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Image(painter = painterResource(id = R.drawable.app_logo), contentDescription = "App Logo Background", modifier = Modifier.fillMaxSize().graphicsLayer(alpha = 0.15f), contentScale = ContentScale.Fit)
+                        Text("Bluetooth Printer", textAlign = TextAlign.Center, style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold))
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primary,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimary
-                )
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.primary, titleContentColor = MaterialTheme.colorScheme.onPrimary)
             )
         }
     ) { padding ->
         LazyColumn(
-            modifier = Modifier
-                .padding(padding)
-                .padding(16.dp)
-                .fillMaxSize(),
+            modifier = Modifier.padding(padding).padding(16.dp).fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             item {
                 if (sessaoId == null) {
-                    Card(
-                        modifier = Modifier.fillMaxWidth(),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp).fillMaxWidth(),
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
+                    Card(modifier = Modifier.fillMaxWidth(), elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)) {
+                        Column(modifier = Modifier.padding(16.dp).fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("Login", style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
-                            Button(onClick = { viewModel.fazerLogin(fixedUsername, fixedPassword) }) {
-                                Text("Acessar Sistema")
-                            }
+                            Button(onClick = { viewModel.fazerLogin(fixedUsername, fixedPassword) }) { Text("Acessar Sistema") }
                         }
                     }
                 } else {
                     StyledCard {
                         Text("Buscar Pedido", style = MaterialTheme.typography.titleMedium)
-                        OutlinedTextField(
-                            value = pedidoNumber,
-                            onValueChange = { pedidoNumber = it },
-                            label = { Text("Número do Pedido") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        OutlinedTextField(value = pedidoNumber, onValueChange = { pedidoNumber = it }, label = { Text("Número do Pedido") }, modifier = Modifier.fillMaxWidth())
                         Spacer(modifier = Modifier.height(8.dp))
                         Button(
                             onClick = {
                                 keyboardController?.hide()
-                                val filial = "8637511000120" // Consider making this configurable or from settings
+                                val filial = "8637511000120"
                                 viewModel.consultarPedido(sessaoId!!, filial, pedidoNumber)
                             },
                             enabled = pedidoNumber.isNotBlank()
@@ -242,68 +169,35 @@ fun MainScreen(viewModel: PedidoViewModel = hiltViewModel()) {
                             InfoRow("Itens:", (firstPedido?.PedidoProdutos?.size ?: 0).toString())
                         }
 
-                        // --- Bluetooth Printing Section ---
                         StyledCard {
                             Text("Impressão Bluetooth", style = MaterialTheme.typography.titleMedium)
                             Spacer(modifier = Modifier.height(8.dp))
 
                             Button(onClick = {
-                                // This button now primarily focuses on ensuring permissions to list devices
-                                ensurePermissionsAndExecute(actionRequiresScan = true, actionRequiresConnect = true) {
-                                    // Callback if permissions were already granted or just got granted.
-                                    // The UI below will react based on permission status.
-                                    scope.launch { snackbarHostState.showSnackbar("Permissões verificadas. Verifique a lista de dispositivos.")}
-                                    deviceListPermissionsAttempted = true // Explicitly set true here
+                                showDeviceList = false
+                                val listAction = {
+                                    @SuppressLint("MissingPermission")
+                                    val devices = bluetoothAdapter?.bondedDevices?.toList() ?: emptyList()
+                                    pairedDevices = devices
+                                    showDeviceList = true
                                 }
+                                requestPermissionsAndRun(listAction)
                             }) {
                                 Text("Listar Impressoras Pareadas")
                             }
                             Spacer(modifier = Modifier.height(8.dp))
 
-                            // --- Display Paired Devices ---
-                            val hasRequiredPermissionsForDeviceList = remember(deviceListPermissionsAttempted) { // Recompose when attempt status changes
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                                    ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED &&
-                                            ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED // SCAN helps ensure full device info
-                                } else {
-                                    ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
-                                }
-                            }
-
-                            if (deviceListPermissionsAttempted && hasRequiredPermissionsForDeviceList && bluetoothAdapter?.isEnabled == true) {
-                                val pairedDevices: List<BluetoothDevice> = try {
-                                    bluetoothAdapter.bondedDevices?.toList() ?: emptyList()
-                                } catch (e: SecurityException) {
-                                    Log.e("MainScreenBT", "SecurityException getting bonded devices: ${e.message}")
-                                    localError = "Erro de segurança ao listar. Verifique permissões."
-                                    emptyList()
-                                }
-
+                            if (showDeviceList) {
                                 if (pairedDevices.isNotEmpty()) {
                                     Text("Selecione a impressora:", style = MaterialTheme.typography.bodyMedium)
                                     pairedDevices.forEach { device ->
-                                        val deviceName = try {
-                                            // On API 31+, device.name requires BLUETOOTH_CONNECT
-                                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S &&
-                                                ContextCompat.checkSelfPermission(context, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
-                                                "Permissão CONNECT pendente"
-                                            } else {
-                                                device.name ?: "Dispositivo Desconhecido"
-                                            }
-                                        } catch (e: SecurityException) { "Permissão pendente (Nome)" }
-
+                                        @SuppressLint("MissingPermission")
+                                        val deviceName = device.name ?: "Dispositivo Desconhecido"
                                         Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .selectable(selected = device.address == selectedDevice?.address, onClick = { selectedDevice = device })
-                                                .padding(vertical = 4.dp),
+                                            modifier = Modifier.fillMaxWidth().selectable(selected = device.address == selectedDevice?.address, onClick = { selectedDevice = device }).padding(vertical = 4.dp),
                                             verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            RadioButton(
-                                                selected = device.address == selectedDevice?.address,
-                                                onClick = { selectedDevice = device },
-                                                colors = RadioButtonDefaults.colors(selectedColor = MaterialTheme.colorScheme.primary)
-                                            )
+                                            RadioButton(selected = device.address == selectedDevice?.address, onClick = { selectedDevice = device })
                                             Spacer(modifier = Modifier.width(8.dp))
                                             Text(text = deviceName, style = MaterialTheme.typography.bodyMedium)
                                             Text(text = " (${device.address})", style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 2.dp))
@@ -312,50 +206,42 @@ fun MainScreen(viewModel: PedidoViewModel = hiltViewModel()) {
                                 } else {
                                     Text("Nenhuma impressora pareada encontrada.", style = MaterialTheme.typography.bodyMedium)
                                 }
-                            } else if (deviceListPermissionsAttempted && !hasRequiredPermissionsForDeviceList) {
-                                Text("Permissões Bluetooth necessárias não foram concedidas. Clique em 'Listar Impressoras' para tentar novamente.",
-                                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
-                            } else if(bluetoothAdapter?.isEnabled == false && deviceListPermissionsAttempted){
-                                Text("Bluetooth está desativado. Ative-o e clique em 'Listar Impressoras'.",
-                                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
-                            }
-                            else {
-                                // Initial state or Bluetooth disabled before first attempt
-                                Text("Clique em 'Listar Impressoras' para procurar dispositivos pareados.", style = MaterialTheme.typography.bodyMedium)
+                            } else {
+                                Text("Clique em 'Listar Impressoras' para procurar.", style = MaterialTheme.typography.bodyMedium)
                             }
 
                             Spacer(modifier = Modifier.height(16.dp))
                             Button(
                                 onClick = {
-                                    ensurePermissionsAndExecute(actionRequiresConnect = true, actionRequiresScan = false) { // Scan not strictly needed for print if device is known
-                                        selectedDevice?.let { deviceToPrint ->
-                                            viewModel.printPedido(context, deviceToPrint)
-                                        } ?: run { localError = "Nenhuma impressora selecionada." }
+                                    val printAction = {
+                                        val job = scope.launch {
+                                            selectedDevice?.let { deviceToPrint ->
+                                                viewModel.printPedido(context, deviceToPrint)
+                                            } ?: run {
+                                                snackbarHostState.showSnackbar("Nenhuma impressora selecionada.")
+                                            }
+                                        }
                                     }
+                                    requestPermissionsAndRun(printAction)
                                 },
-                                enabled = selectedDevice != null, // Enable only if a device is selected
+                                enabled = selectedDevice != null,
                                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary)
-                            ) {
-                                Text("Imprimir Pedido")
-                            }
-                        } // End Bluetooth StyledCard
+                            ) { Text("Imprimir Pedido") }
+                        }
 
                         Spacer(modifier = Modifier.height(8.dp))
                         Button(
-                            onClick = {
-                                sessaoId?.let { sid -> viewModel.fazerLogout(sid) }
-                                // Snackbar message handled by LaunchedEffect on viewModel.error or a success message
-                            },
+                            onClick = { sessaoId?.let { sid -> viewModel.fazerLogout(sid) } },
                             colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
                         ) { Text("Logout") }
                     }
-                } // End if (pedido != null)
-            } // End item scope for Logged In content
-        } // End LazyColumn
-    } // End Scaffold
+                }
+            }
+        }
+    }
 }
 
-// Helper Composable for consistent Card styling (remains the same)
+// --- Your Helper Composables, Restored ---
 @Composable
 fun StyledCard(
     modifier: Modifier = Modifier,
@@ -375,7 +261,6 @@ fun StyledCard(
     }
 }
 
-// Helper Composable for info rows (remains the same)
 @Composable
 fun InfoRow(label: String, value: String) {
     Row(

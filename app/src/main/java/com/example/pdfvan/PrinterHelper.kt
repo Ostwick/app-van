@@ -15,6 +15,12 @@ object PrinterHelper {
 
     private const val TAG = "PrinterHelper"
 
+    private fun String.removeAccents(): String {
+        val normalized = java.text.Normalizer.normalize(this, java.text.Normalizer.Form.NFD)
+        // This regex removes all characters in the "Combining Diacritical Marks" block
+        return "\\p{InCombiningDiacriticalMarks}+".toRegex().replace(normalized, "")
+    }
+
     fun printPedido(context: Context, device: android.bluetooth.BluetoothDevice, pedidoResponse: PedidoResponse) {
         val connection = BluetoothConnection(device)
         var totalDescontos = 0f
@@ -74,7 +80,7 @@ object PrinterHelper {
 
             val finalText = """
 [L]PEDIDO: ${pedido.PDV_PedidoCodigo}               ${pedido.PDV_PedidoDataEmissao}
-[L]Empresa: ${pedido.PDV_PedidoEmpDescricao}
+[L]Empresa: ${pedido.PDV_PedidoEmpCodigo} - ${pedido.PDV_PedidoEmpDescricao}
 [L]Fantasia: ${pedido.PDV_PedidoEmpFantasia}
 [L]Endereco: ${endereco?.EMP_EnderecoLogradouro ?: ""}, ${endereco?.EMP_EnderecoNumero ?: ""}
 [L]Bairro: ${endereco?.EMP_EnderecoBairro ?: ""} - CEP: ${endereco?.CID_LogradouroCEP?.toString() ?: ""}
@@ -102,7 +108,7 @@ $produtosFormatados
             Log.d(TAG, "Texto formatado para impressão:\n$finalText")
 
             val printer = EscPosPrinter(connection, 203, 48f, 32)
-            printer.printFormattedText(finalText)
+            printer.printFormattedText(finalText.removeAccents())
 
             Toast.makeText(context, "Impressão concluída com sucesso", Toast.LENGTH_SHORT).show()
         } catch (e: Exception) {

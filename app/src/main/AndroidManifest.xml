@@ -3,30 +3,21 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <!-- For Android 11 (API 30) and lower -->
-    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+    <uses-permission android:name="android.permission.BLUETOOTH"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
 
     <!-- For Android 12 (API 31) and higher -->
-    <!--
-        IMPORTANT: If you are SURE your app does not derive physical location from Bluetooth scans
-        (e.g., you are not using Bluetooth beacons for location), add usesPermissionFlags.
-        Otherwise, location permission MIGHT still be implicitly needed or improve scan results.
-    -->
     <uses-permission android:name="android.permission.BLUETOOTH_SCAN"
         android:usesPermissionFlags="neverForLocation"
         tools:targetApi="s" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 
     <!--
-        Location Permissions:
-        - REQUIRED for Bluetooth discovery to return results on Android 11 (API 30) and older.
-        - If you use "neverForLocation" with BLUETOOTH_SCAN, this is not strictly needed for
-          Bluetooth scanning ON ANDROID 12+ for apps that don't derive location.
-        - However, if your app supports Android 11 and below, you WILL need this for BT scanning.
-        - Given you likely support older Android versions, keeping FINE_LOCATION is safer.
-          You'll need to request it at runtime for < API 31.
+        You may still need ACCESS_FINE_LOCATION on Android 12+ if you use Bluetooth
+        scan results to derive physical location. If not, the above is sufficient.
     -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- ACCESS_COARSE_LOCATION is usually not needed if you have ACCESS_FINE_LOCATION -->
     <!-- <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" /> -->
 
@@ -66,7 +57,6 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="@string/app_name"
             android:theme="@style/Theme.PDFVan">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
