@@ -71,14 +71,14 @@ object PrinterHelper {
                 val totalFormatado = formatter.format(valorTotalComImpostos)
 
 
-                "$codigo - $nome  \nQtd: $qtd  Unit: $unit  Desc: $desconto  Total: $totalFormatado"
+                "$codigo - $nome  \nQtd: $qtd  Unit: $unit  Desc: $desconto  Total: $totalFormatado\n................................................"
             }
 
             val impostosCalculados = calcularImpostosTotais(pedido, formatter) // Passa o formatador
             val stTotal = impostosCalculados.st
             val demaisImpostosTotal = impostosCalculados.demaisImpostos
 
-            val finalText = """
+            val finalText = """<b>
 [L]PEDIDO: ${pedido.PDV_PedidoCodigo}               ${pedido.PDV_PedidoDataEmissao}
 [L]Empresa: ${pedido.PDV_PedidoEmpCodigo} - ${pedido.PDV_PedidoEmpDescricao}
 [L]Fantasia: ${pedido.PDV_PedidoEmpFantasia}
@@ -92,7 +92,7 @@ object PrinterHelper {
 $produtosFormatados
 
 [C]************************************************
-[C]<b>TOTAIS:</b>
+[C]TOTAIS:
 [L]Total: ${formatter.format(pedido.PDV_PedidoValorTotal.toFloatOrNull() ?: 0f)}
 [L]Frete: ${formatter.format(pedido.PDV_PedidoFreteValor.toFloatOrNull() ?: 0f)}
 [L]Descontos: ${formatter.format(totalDescontos)}
@@ -101,8 +101,8 @@ $produtosFormatados
 [L]Pagamento: ${pedido.PDV_PedidoCondicaoPgtoDescricao}
 [L]Obs: ${pedido.PDV_PedidoObs}
 
-            [C]_____________________________
-            [C]Assinatura do Cliente
+[C]________________________________________________
+[C]Assinatura do Cliente</b>
             """.trimIndent()
 
             Log.d(TAG, "Texto formatado para impressão:\n$finalText")
